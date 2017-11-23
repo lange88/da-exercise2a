@@ -5,7 +5,6 @@ import java.net.MalformedURLException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Created by jeroen on 11/22/17.
@@ -16,7 +15,7 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
     private int nextProcessId;
     private int ntid = -1, nntid = -1;
     private boolean elected = false, relay = false;
-    private ReentrantLock lock = new ReentrantLock();
+    private static Object lock = new Object();
 
     DA_Peterson(int id, int nextProcessId) throws RemoteException {
         this.id = id;
@@ -52,8 +51,7 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
      */
     private void gettid(boolean lookupntid) {
         while (true) {
-            lock.lock();
-            try {
+            synchronized (lock) {
                 if (lookupntid) {
                     if (ntid != -1) {
                         return;
@@ -63,14 +61,6 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
                         return;
                     }
                 }
-            } finally {
-                lock.unlock();
-            }
-
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
         }
     }
@@ -137,8 +127,7 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
      */
     @Override
     public void receive(Message m) throws RemoteException {
-        lock.lock();
-        try {
+        synchronized (lock) {
             if (ntid == -1) {
                 ntid = m.id;
                 System.out.println("[" + id + "] received ntid=" + ntid);
@@ -146,8 +135,6 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
                 nntid = m.id;
                 System.out.println("[" + id + "] received nntid=" + nntid);
             }
-        } finally {
-            lock.unlock();
         }
     }
 }
