@@ -9,6 +9,7 @@ import java.util.Arrays;
 /**
  * Created by jeroen on 11/22/17.
  * Main class for Peterson algorithm.
+ * Example arguments: -t 5 -i "4 8 12 3 10"
  */
 public class DA_Peterson_main {
     public static void main(String... args) {
