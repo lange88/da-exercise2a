@@ -82,7 +82,7 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
     @Override
     public void run() {
         try {
-            Thread.sleep(1500);
+            Thread.sleep(1000);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -91,6 +91,7 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
                 // process is active
                 tid = id;
                 while (true) {
+                    System.out.println("[" + id + "] send tid=" + tid);
                     send(tid);
                     gettid(true);
                     if (ntid == id) {
@@ -98,6 +99,8 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
                         System.out.println("Process id=" + id + " has been elected!");
                         return;
                     }
+                    System.out.println("[" + id + "] send max(tid=" + tid + ",ntid=" + ntid + ")="
+                            + Math.max(tid, ntid));
                     send(Math.max(tid, ntid));
                     gettid(false);
                     if (nntid == id) {
@@ -117,6 +120,7 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
             } else {
                 // process is a relay
                 while (true) {
+                    ntid = -1; // reset ntid so receive() knows to set ntid when receiving
                     gettid(true);
                     if (ntid == id) {
                         elected = true;
@@ -124,7 +128,6 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
                         return;
                     }
                     send(ntid);
-                    ntid = -1; // reset ntid so receive() knows to set ntid when receiving
                 }
             }
         }
