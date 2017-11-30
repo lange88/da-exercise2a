@@ -5,17 +5,31 @@ import java.net.MalformedURLException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Created by jeroen on 11/22/17.
  * Implementation class for Peterson's algorithm.
  */
 public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI, Runnable {
-    private int tid = 0, id;
+    private static boolean elected = false;
+
+    private int id;
     private int nextProcessId;
-    private int ntid = -1, nntid = -1;
-    private boolean elected = false, relay = false;
-    private static Object lock = new Object();
+
+    private int tid = -1;
+    private int ntid = -1;
+
+    private boolean active = true;
+    private boolean receivingNtid = true;
+
+    private DA_Peterson_RMI nextProcess = null;
+
+    private List<Message> messageList = Collections.synchronizedList(new ArrayList<Message>());
 
     DA_Peterson(int id, int nextProcessId) throws RemoteException {
         this.id = id;
@@ -23,118 +37,112 @@ public class DA_Peterson extends UnicastRemoteObject implements DA_Peterson_RMI,
     }
 
     /**
-     * Send id through RMI.
-     * @param id ID to send.
+     * Thread worker function that runs the algorithm.
      */
-    private void send(int id) {
-        String name = "rmi://localhost/DA_Peterson_" + nextProcessId;
-        try {
-            Message m = new Message(id);
-            DA_Peterson_RMI o = (DA_Peterson_RMI) java.rmi.Naming.lookup(name);
-            o.receive(m);
-        } catch (NotBoundException e1) {
-            System.out.println("NotBoundException while sending message for name: " + name);
-            e1.printStackTrace();
-        } catch (MalformedURLException e1) {
-            System.out.println("MalformedURLException while sending message for name: " + name);
-            e1.printStackTrace();
-        } catch (RemoteException e1) {
-            System.out.println("RemoteException while sending message for name: " + name);
-            e1.printStackTrace();
+    @Override
+    public void run() {
+        //It is possible that messages have been received by this process before
+        //this code is called, so we have to ensure the tid message is the first message,
+        //by putting it in front of the queue
+        messageList.add(0, new Message(id));
+
+        while (!elected) {
+            sendMessages();
+            try {
+                //This algorithm should be able to deal with any timeout, so you can play around with the
+                //actual sleep time
+                Thread.sleep(0);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
     }
 
     /**
-     * Function that blocks until it either receives ntid or nntid.
-     * @param lookupntid iff true block until ntid is received,
-     *                   else block until nntid is received
+     * Receive a message through RMI. The message is added to a message queue in order to ensure the order is
+     * preserved.
+     * @param m Message to be received.
+     * @throws RemoteException Exception occurred with RMI interface.
      */
-    private void gettid(boolean lookupntid) {
-        while (true) {
-            synchronized (lock) {
-                if (lookupntid) {
-                    if (ntid != -1) {
-                        return;
-                    }
-                } else {
-                    if (nntid != -1) {
-                        return;
+    @Override
+    public void receive(Message m) throws RemoteException {
+        //Initialize tid for comparison purposes
+        if (tid == -1) {
+            tid = id;
+        }
+
+        if (receivingNtid) {
+            System.out.println("[" + id + "] received ntid=" + m.id);
+            if (checkElected(m.id)) return;
+            if (active) {
+                //Send max of tid and ntid to next process.
+                messageList.add(new Message(Math.max(tid, m.id)));
+                //Update ntid for relay calculation
+                ntid = m.id;
+                receivingNtid = false;
+            } else /*process is a relay*/ {
+                messageList.add(new Message(m.id));
+            }
+
+        } else /*receiving nntid*/{
+            System.out.println("[" + id + "] received nntid=" + m.id);
+            if (checkElected(m.id)) return;
+            if (ntid >= tid && ntid == m.id) {
+                //Since m.id == max(ntid, nntid), ntid is always <= m.id
+                //Coming here means ntid = m.id, so the direct neighbour has the highest identity
+                //We stay active and assume its identity
+                tid = ntid;
+                messageList.add(new Message(m.id));
+            } else {
+                System.out.println("Process [" + id + "] switched to relay mode");
+                //The second neighbour has the highest identity, so we take up that identity
+                tid = m.id;
+                //Then we switch to relay mode
+                active = false;
+            }
+            receivingNtid = true;
+        }
+    }
+
+    private void sendMessages() {
+        if (messageList.isEmpty() || elected) {
+            return;
+        }
+
+        if (nextProcess == null) {
+            try {
+                String name = "rmi://localhost/DA_Peterson_" + nextProcessId;
+                nextProcess = (DA_Peterson_RMI) java.rmi.Naming.lookup(name);
+            } catch (Exception e) {
+                System.out.println("Failed to connect to next process, retrying later");
+                return;
+            }
+        }
+        while (!messageList.isEmpty()) {
+            Message nextMessage = messageList.remove(0);
+            boolean success = false;
+            while (!success) {
+                try {
+                    nextProcess.receive(nextMessage);
+                    success = true;
+                } catch (RemoteException e) {
+                    System.out.println("Failed to deliver message, retrying in 1 second");
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e1) {
+                        System.out.println("Thread await was interrupted, retrying immediately");
                     }
                 }
             }
         }
     }
 
-    /**
-     * Thread worker function that runs the algorithm.
-     */
-    @Override
-    public void run() {
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+    private boolean checkElected(int electionId) {
+        if (electionId == id) {
+            System.out.println("*************** Process id=" + id + " has been elected! *****************");
+            elected = true;
+            return true;
         }
-
-        // process is active
-        tid = id;
-        while (true) {
-            System.out.println("[" + id + "] send tid=" + tid);
-            send(tid);
-            gettid(true);
-            if (ntid == id) {
-                elected = true;
-                System.out.println("Process id=" + id + " has been elected!");
-                return;
-            }
-            System.out.println("[" + id + "] send max(tid=" + tid + ",ntid=" + ntid + ")="
-                    + Math.max(tid, ntid));
-            send(Math.max(tid, ntid));
-            gettid(false);
-            if (nntid == id) {
-                elected = true;
-                System.out.println("Process id=" + id + " has been elected!");
-                return;
-            }
-            if (ntid >= tid && ntid >= nntid) {
-                tid = ntid;
-            } else {
-                relay = true;
-                break;
-            }
-            ntid = -1;
-            nntid = -1;
-        }
-
-        // process is a relay
-        while (true) {
-            ntid = -1; // reset ntid so receive() knows to set ntid when receiving
-            nntid = -1;
-            gettid(true);
-            if (ntid == id) {
-                elected = true;
-                System.out.println("Process id=" + id + " has been elected!");
-                return;
-            }
-            send(ntid);
-        }
-    }
-
-    /**
-     * Receive a message through RMI.
-     * @param m Message to be received.
-     * @throws RemoteException Exception occurred with RMI interface.
-     */
-    @Override
-    public void receive(Message m) throws RemoteException {
-        synchronized (lock) {
-            if (ntid == -1) {
-                ntid = m.id;
-                System.out.println("[" + id + "] received ntid=" + ntid);
-            } else if (nntid == -1){
-                nntid = m.id;
-                System.out.println("[" + id + "] received nntid=" + nntid);
-            }
-        }
+        return false;
     }
 }

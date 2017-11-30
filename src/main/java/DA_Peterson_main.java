@@ -70,7 +70,9 @@ public class DA_Peterson_main {
             // finally start the worker thread of the process
             System.out.println("Starting process node with id=" + processIds[i]
                     + ", totalProcesses=" + totalProcesses);
-            new Thread(da).start();
+            new Thread(da, "Thread for process " + processIds[i]).start();
         }
+
+        System.out.println("Done starting");
     }
 }
